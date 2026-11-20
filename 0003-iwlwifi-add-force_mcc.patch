@@ -1,0 +1,60 @@
+diff --git a/drivers/net/wireless/intel/iwlwifi/iwl-drv.c b/drivers/net/wireless/intel/iwlwifi/iwl-drv.c
+index 7f1515d..83b6133 100644
+--- a/drivers/net/wireless/intel/iwlwifi/iwl-drv.c
++++ b/drivers/net/wireless/intel/iwlwifi/iwl-drv.c
+@@ -2163,6 +2163,10 @@ MODULE_PARM_DESC(fw_restart, "restart firmware in case of error (default true)")
+ module_param_named(nvm_file, iwlwifi_mod_params.nvm_file, charp, 0444);
+ MODULE_PARM_DESC(nvm_file, "NVM file name");
+ 
++module_param_named(force_mcc, iwlwifi_mod_params.force_mcc, charp, 0444);
++MODULE_PARM_DESC(force_mcc,
++		 "Force MCC (ISO 3166 alpha-2 country code, e.g. CN); empty disables");
++
+ module_param_named(uapsd_disable, iwlwifi_mod_params.uapsd_disable, uint, 0644);
+ MODULE_PARM_DESC(uapsd_disable,
+ 		 "disable U-APSD functionality bitmap 1: BSS 2: P2P Client (default: 3)");
+diff --git a/drivers/net/wireless/intel/iwlwifi/iwl-modparams.h b/drivers/net/wireless/intel/iwlwifi/iwl-modparams.h
+index 0476df7..dd012f3 100644
+--- a/drivers/net/wireless/intel/iwlwifi/iwl-modparams.h
++++ b/drivers/net/wireless/intel/iwlwifi/iwl-modparams.h
+@@ -77,6 +77,11 @@ struct iwl_mod_params {
+ 	u32 debug_level;
+ #endif
+ 	char *nvm_file;
++	/**
++	 * @force_mcc: force the MCC (ISO 3166 alpha-2, e.g. "CN") that is sent
++	 * to the firmware. Empty/not set = default behavior.
++	 */
++	char *force_mcc;
+ 	u32 uapsd_disable;
+ 	bool disable_11ac;
+ 	/**
+diff --git a/drivers/net/wireless/intel/iwlwifi/mvm/nvm.c b/drivers/net/wireless/intel/iwlwifi/mvm/nvm.c
+index f76e573..5af7dac 100644
+--- a/drivers/net/wireless/intel/iwlwifi/mvm/nvm.c
++++ b/drivers/net/wireless/intel/iwlwifi/mvm/nvm.c
+@@ -583,6 +583,24 @@ int iwl_mvm_init_mcc(struct iwl_mvm *mvm)
+ 	if (!iwl_mvm_is_lar_supported(mvm))
+ 		return 0;
+ 
++	/*
++	 * If force_mcc is set, tell the firmware to use that MCC. This can
++	 * unlock 5GHz channels for AP mode when the firmware's LAR domain
++	 * cannot be determined (e.g. world roaming / country 00) and all
++	 * 5GHz channels are marked "No IR".
++	 */
++	if (iwlwifi_mod_params.force_mcc && iwlwifi_mod_params.force_mcc[0]) {
++		mvm->lar_regdom_set = false;
++		regd = iwl_mvm_get_regdomain(mvm->hw->wiphy,
++					     iwlwifi_mod_params.force_mcc,
++					     MCC_SOURCE_BIOS, NULL);
++		if (IS_ERR_OR_NULL(regd))
++			return -EIO;
++		retval = regulatory_set_wiphy_regd_sync(mvm->hw->wiphy, regd);
++		kfree(regd);
++		return retval;
++	}
++
+ 	/*
+ 	 * try to replay the last set MCC to FW. If it doesn't exist,
+ 	 * queue an update to cfg80211 to retrieve the default alpha2 from FW.

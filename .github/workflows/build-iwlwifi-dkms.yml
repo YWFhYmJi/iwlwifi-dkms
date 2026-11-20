@@ -1,0 +1,180 @@
+name: Build iwlwifi DKMS package
+
+on:
+  schedule:
+    # 每 6 小时的第 23 分钟检查一次
+    - cron: "23 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write   # 需要 push 提交 + 创建 Release
+
+concurrency:
+  group: build-iwlwifi-dkms
+  cancel-in-progress: false
+
+jobs:
+  update:
+    name: Check, build and publish
+    runs-on: ubuntu-latest
+
+    container:
+      image: archlinux:base-devel
+
+    defaults:
+      run:
+        shell: bash
+
+    env:
+      PACKAGE_BUILD_DIR: /tmp/iwlwifi-dkms-build
+      GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+
+    steps:
+      # base-devel 不含 curl/jq/gh/nodejs，且 actions/checkout 需要 node。
+      - name: Install build tools
+        run: |
+          set -Eeuo pipefail
+          pacman -Syu --noconfirm --needed \
+            ca-certificates \
+            curl \
+            git \
+            jq \
+            openssh \
+            pacman-contrib \
+            rsync \
+            tar \
+            gzip \
+            nodejs \
+            github-cli \
+            dkms
+
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.repository.default_branch }}
+
+      - name: Verify checkout
+        run: |
+          set -Eeuo pipefail
+          git config --global --add safe.directory "${GITHUB_WORKSPACE}"
+          [[ -d "${GITHUB_WORKSPACE}/.git" ]] || { echo "::error::No .git"; exit 1; }
+          git -C "${GITHUB_WORKSPACE}" rev-parse --show-toplevel
+
+      - name: Check Arch kernel and update sources
+        id: update
+        run: |
+          set -Eeuo pipefail
+          cd "${GITHUB_WORKSPACE}"
+          chmod +x scripts/update-iwlwifi-dkms.sh
+          scripts/update-iwlwifi-dkms.sh
+
+      # makepkg 拒绝以 root 运行，因此创建一个无特权用户
+      - name: Create unprivileged build user
+        if: steps.update.outputs.changed == 'true'
+        run: |
+          set -Eeuo pipefail
+          if ! id builder >/dev/null 2>&1; then
+            useradd --create-home builder
+          fi
+          chown -R builder:builder "${GITHUB_WORKSPACE}"
+
+      # updpkgsums 会读取 PKGBUILD 的 source=() 数组重新计算校验和。
+      # 此步骤以 builder 运行，避免 makepkg 对 root 的检查。
+      - name: Update checksums and regenerate .SRCINFO
+        if: steps.update.outputs.changed == 'true'
+        run: |
+          set -Eeuo pipefail
+          runuser -u builder -- \
+            env HOME=/home/builder GITHUB_WORKSPACE="${GITHUB_WORKSPACE}" \
+            bash -c '
+              set -Eeuo pipefail
+              cd "${GITHUB_WORKSPACE}"
+              updpkgsums
+              makepkg --printsrcinfo > .SRCINFO
+            '
+
+      - name: Commit and push changes
+        if: steps.update.outputs.changed == 'true'
+        run: |
+          set -Eeuo pipefail
+          cd "${GITHUB_WORKSPACE}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git commit -m "Update iwlwifi to ${{ steps.update.outputs.pkgver }}"
+          git push origin "HEAD:${GITHUB_DEFAULT_BRANCH}"
+
+      # 在隔离目录构建，避免 --cleanbuild/--clean 影响仓库的 .git
+      - name: Prepare isolated build directory
+        if: steps.update.outputs.changed == 'true'
+        run: |
+          set -Eeuo pipefail
+          readonly repo_dir="${GITHUB_WORKSPACE}"
+          readonly build_dir="${PACKAGE_BUILD_DIR}"
+          rm -rf "${build_dir}"
+          install -d -m 755 -o builder -g builder "${build_dir}"
+          rsync --archive --delete \
+            --exclude='.git/' \
+            --exclude='.github/' \
+            --exclude='scripts/' \
+            --exclude='src/' \
+            --exclude='pkg/' \
+            --exclude='*.pkg.tar.*' \
+            "${repo_dir}/" "${build_dir}/"
+          chown -R builder:builder "${build_dir}"
+
+      - name: Build package
+        if: steps.update.outputs.changed == 'true'
+        run: |
+          set -Eeuo pipefail
+          runuser -u builder -- \
+            env HOME=/home/builder PACKAGE_BUILD_DIR="${PACKAGE_BUILD_DIR}" \
+            bash -c '
+              set -Eeuo pipefail
+              cd "${PACKAGE_BUILD_DIR}"
+              makepkg --cleanbuild --clean --noconfirm
+            '
+
+      - name: Run packaging checks
+        if: steps.update.outputs.changed == 'true'
+        run: |
+          set -Eeuo pipefail
+          readonly build_dir="${PACKAGE_BUILD_DIR}"
+          package_file="$(find "${build_dir}" -maxdepth 1 -type f \
+              -name '*.pkg.tar.zst' ! -name '*.sig' -print -quit)"
+          [[ -n "${package_file}" ]] || { echo "::error::makepkg produced no package"; exit 1; }
+          echo "Built package: ${package_file}"
+          # DKMS 外部模块的 namcap 警告通常不可靠，仅作提示
+          namcap "${package_file}" || true
+
+      - name: Upload package to GitHub Release
+        if: steps.update.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -Eeuo pipefail
+          readonly build_dir="${PACKAGE_BUILD_DIR}"
+          package_file="$(find "${build_dir}" -maxdepth 1 -type f \
+              -name '*.pkg.tar.zst' ! -name '*.sig' -print -quit)"
+          [[ -n "${package_file}" ]] || { echo "::error::No package to upload"; exit 1; }
+
+          release_tag="${{ steps.update.outputs.release_tag }}"
+          pkgver="${{ steps.update.outputs.pkgver }}"
+          repo="${{ github.repository }}"
+
+          if gh release view "${release_tag}" --repo "${repo}" >/dev/null 2>&1; then
+            echo "Release ${release_tag} already exists; uploading (clobber)"
+          else
+            gh release create "${release_tag}" \
+              --repo "${repo}" \
+              --title "iwlwifi-dkms ${pkgver}" \
+              --notes "iwlwifi-dkms for Linux ${pkgver}, built from gregkh/linux tag v${pkgver}." \
+              --target "${GITHUB_DEFAULT_BRANCH}"
+          fi
+
+          gh release upload "${release_tag}" "${package_file}" --clobber --repo "${repo}"
