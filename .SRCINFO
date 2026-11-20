@@ -1,0 +1,21 @@
+pkgbase = iwlwifi-dkms
+	pkgdesc = Intel wireless chips driver from linux (7.3.5) with patch for lar_disable and force_mcc parameter 5GHz band support
+	pkgver = 7.3.5
+	pkgrel = 1
+	url = https://wireless.wiki.kernel.org/en/users/drivers/iwlwifi
+	arch = any
+	license = GPL-2.0-only
+	depends = dkms
+	options = !strip
+	source = iwlwifi-v7.3.5.tar.gz
+	source = dkms.conf
+	source = 0001-iwlwifi-add-lar_disable.patch
+	source = 0002-iwlwifi-nvm-unlock-6ghz-and-relax-channel-flags.patch
+	source = 0003-iwlwifi-add-force_mcc.patch
+	sha256sums = 7cd3bf6e5510a55d1fcc0bf530aa811afdd10a22174c82cad125762883ddac66
+	sha256sums = f17ed01e8bfb36dfbf62982a29ad87b5c4ac86d8a5b2fb33716f844c3ff12824
+	sha256sums = da2ab52ccdef2b93088c9e0c56bc1c166bf748d021b529cb2af2ff6c5d9e85cc
+	sha256sums = 96f91b3ff8d5caafe4939cb22bb455d34d107d08e14cf3af6dbb47ef70553732
+	sha256sums = ade4d49f6cd1690c46a78cab1894d76d63f81e0fbd0491fe3301fc6649f16a8a
+
+pkgname = iwlwifi-dkms

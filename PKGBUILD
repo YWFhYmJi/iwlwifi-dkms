@@ -4,7 +4,7 @@
 
 _srcname=iwlwifi
 pkgname=${_srcname}-dkms
-pkgver=7.3.4
+pkgver=7.3.5
 pkgrel=1
 pkgdesc="Intel wireless chips driver from linux ($pkgver) with patch for lar_disable and force_mcc parameter 5GHz band support"
 arch=('any')
@@ -16,12 +16,11 @@ source=("iwlwifi-v${pkgver}.tar.gz"
         "0001-iwlwifi-add-lar_disable.patch"
         "0002-iwlwifi-nvm-unlock-6ghz-and-relax-channel-flags.patch"
         "0003-iwlwifi-add-force_mcc.patch")
-sha256sums=(
-         '4097889236a2af26c293033feb964c4cf118c0224e0d063fec0a89e9d0569ef2'
-         'f17ed01e8bfb36dfbf62982a29ad87b5c4ac86d8a5b2fb33716f844c3ff12824'
-         'da2ab52ccdef2b93088c9e0c56bc1c166bf748d021b529cb2af2ff6c5d9e85cc'
-         '96f91b3ff8d5caafe4939cb22bb455d34d107d08e14cf3af6dbb47ef70553732'
-         'ade4d49f6cd1690c46a78cab1894d76d63f81e0fbd0491fe3301fc6649f16a8a')
+sha256sums=('7cd3bf6e5510a55d1fcc0bf530aa811afdd10a22174c82cad125762883ddac66'
+            'f17ed01e8bfb36dfbf62982a29ad87b5c4ac86d8a5b2fb33716f844c3ff12824'
+            'da2ab52ccdef2b93088c9e0c56bc1c166bf748d021b529cb2af2ff6c5d9e85cc'
+            '96f91b3ff8d5caafe4939cb22bb455d34d107d08e14cf3af6dbb47ef70553732'
+            'ade4d49f6cd1690c46a78cab1894d76d63f81e0fbd0491fe3301fc6649f16a8a')
 
 options=(!strip)
 
